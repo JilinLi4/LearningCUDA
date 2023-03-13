@@ -22,6 +22,43 @@ bool checkRuntime(cudaError_t e, const char* call, int line, const char *file){
         return true;
 }
 
+class CUDATimeCost {
+public:
+    void start() {
+        elapsed_time_ = 0.0;
+        // 初始化cudaEvent
+        checkCudaRuntime(cudaEventCreate(&start_));
+        checkCudaRuntime(cudaEventCreate(&stop_));
+
+        // 记录开始事件
+        checkCudaRuntime(cudaEventRecord(start_));
+        cudaEventQuery(start_);
+    }
+
+    void stop() {
+        // 记录结束事件
+        checkCudaRuntime(cudaEventRecord(stop_));
+        checkCudaRuntime(cudaEventSynchronize(stop_));
+        // 计算事件差
+        checkCudaRuntime(cudaEventElapsedTime(&elapsed_time_, start_, stop_));
+        checkCudaRuntime(cudaEventDestroy(start_));
+        checkCudaRuntime(cudaEventDestroy(stop_));
+    }
+
+    /**
+     * @brief Get the elapsed time ms
+     * 
+     * @return float 
+     */
+    float get_elapsed_time() {
+        return elapsed_time_;
+    }
+
+private:
+    cudaEvent_t start_, stop_;
+    float elapsed_time_{0.0};
+};
+
 } // CUDATools
 
 #endif // __CUDA_TOOLS_H__

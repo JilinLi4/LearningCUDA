@@ -8,6 +8,7 @@ target("HelloWorldCUDA")
     add_files("src/main.cu")
 
 target("Add")
+    -- add_defines("USE_DP")
     set_kind("binary")
     add_files("src/add.cu")
 
