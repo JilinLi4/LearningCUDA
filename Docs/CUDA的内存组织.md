@@ -30,6 +30,111 @@ CUDA 中的内存组织示意图
 ## 4. 寄存器
 - 在核函数中定义的不加任何限定符的变量一般来说就存放于寄存器中。
 - 一个寄存器占有32位的内存，所以一个双精度浮点数将使用两个寄存器。
+## 5. 总结
+- GPU可以直接访问Pined memory
+- 离计算单元越近，效率越高.
+- new、malloc 分配的是 pageable memory。 
+- cudaMallocHost分配的是PinnedMemory.
+- cudaMalloc 分配的是GlobalMemory
+
+
+# 内存应用案例
+## 1. 利用共享内存实现规约求和
+### 1.1 什么是规约求和
+规约求和的原理如下，把后一半的数据加到前一半上，进过N次迭代，最后归为一个数。
+![ReduceSum](./images/reduce_sum.png)
+
+### 1.2 直接使用global memory
+#### 1.2.1 一个block中的线程可以同步处理。比如一个block中的32个数
+- 第一次迭代
+```shell
+data[0] += data[16]
+data[1] += data[17]
+data[2] += data[18]
+```
+- 第二次迭代
+```shell
+data[0] += data[8]
+data[1] += data[9]
+```
+- 第N次迭代
+
+```shell
+data[0] += data[1]
+```
+
+#### 1.2.2 CPU版本
+```cpp
+void reduce_cpu(real *x, int N, float* y) {
+    for(int offset = N / 2; offset > 0; offset /= 2) { //loop 1
+        for(int n = 0; n< N /2; ++n) { //loop 2 
+            if(n < offset) {
+                x[n] += x[n + offset];
+            }
+        }
+    }
+    y = x[0];
+}
+```
+尝试将CPU版本改成一个GPU代码。此时很自然的想到用GPU线程取代 loop 2
+- 计算线程号
+
+一个错误的版本
+```cpp
+void __global__ reduce(real *d_x, int N, float* d_y)
+{
+    int n = threadIdx.x + blockIdx.x * blockDim.x;
+    for(int offset = N / 2; offset > 0; offset /= 2) { //loop 1
+        // for(int n = 0; n< N /2; ++n) { //loop 2 
+            if(n < offset) {
+                d_x[n] += d_x[n + offset];
+            }
+        // }
+        __syncthreads();
+    }
+    d_y[0] = d_x[0];
+}
+```
+这个版本符合直觉,但是有个问题是，不能保证每个线程的进度一致，有可能线程1才第一轮规约，线程2就走到第3轮了，这势必会造成结果不可靠。
+
+
+#### 1.2.3 仅使用全局内存版本
+- 将数据分到不同的block中
+- 对每个block单独并行处理
+- 再处理每一个block的结果
+- 最后对每个block的第一个值进行求和
+例如 1024 * 1024 大小的数据，每一block处理1024个数据，一个1024个block，处理完后剩下1024个数据，接着再处理。
+
+```cpp
+__global__ void reduce_sum_kernel(float *d_in, float *d_out, int max_size) {
+    int thr_id = blockDim.x * blockIdx.x + threadIdx.x;
+    // 当前block 中的threadIdx.x
+    int tid = threadIdx.x;
+    if(thr_id > max_size) {
+        return;
+    }
+
+    for(int offset = blockDim.x / 2; offset > 0; offset>>=1) {
+        if(tid < offset>) {
+            d_in[thr_id] += d_in[thr_id + s];
+        }
+        __syncthreads(); // 保证block 中的数据同步
+    }
+
+    if (tid == 0) {
+        d_out[blockIdx.x] = d_in[thr_id];
+    }
+}
+```
+
+## 共享内存
+- 共享内存因为更靠近计算单元，所以访问速度更快
+- 共享内存通常可以作为访问全局内存的缓存使用
+- 可以利用共享内存实现线程间通信
+- 通常与 __syncthreads同时出现，这个函数是同步block内的所有线程，全部执行到这一行才往下走
+- 使用方式，通常是在线程id = 0 时候从global memory 取值，然后syscthreads,然后再使用。
+    
+共享内存和寄存器类似，存在于芯片上，具有仅次于寄存器的读写速度，数量也有限，一般是4K。不同于寄存器的是，共享内存对整个线程块可见，其生命周期也与整个线程块一直。也就是说，每个线程块拥有一个共享内存变量的副本。共享内存变量的值在不同的线程块中可以不同。
 
 
 # SM 及其占有率

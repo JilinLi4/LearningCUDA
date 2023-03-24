@@ -12,3 +12,19 @@ target("Add")
     set_kind("binary")
     add_files("src/add.cu")
 
+target("memory")
+    set_kind("binary")
+    add_files("src/memery.cu")
+
+target("stream")
+    set_kind("binary")
+    add_files("src/stream.cu")
+
+target("reduce_sum")
+    set_kind("binary")
+    add_files("src/reduce_sum.cu")
+
+target("reduce_sum1")
+    set_kind("binary")
+    add_files("src/reduce_sum_du.cu")
+
